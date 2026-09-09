@@ -1,4 +1,5 @@
 import { ComplaintCategory, ComplaintPriority } from '../types/database.types';
+import { supabase } from '../lib/supabase';
 
 export interface AIComplaintAnalysis {
   predictedCategory: ComplaintCategory;
@@ -10,52 +11,55 @@ export interface AIComplaintAnalysis {
 }
 
 export const aiService = {
-  // Analyzes complaint title and description securely
   async analyzeComplaint(
     title: string,
     description: string
   ): Promise<AIComplaintAnalysis> {
-    const proxyUrl = import.meta.env.VITE_AI_PROXY_URL;
-
-    // 1. Attempt secure server-side Gemini request if proxy is available
-    if (proxyUrl) {
-      try {
-        const response = await fetch(`${proxyUrl}/analyze-complaint`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        'analyze-complaint',
+        {
+          body: {
+            title,
+            description,
           },
-          body: JSON.stringify({ title, description }),
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          return {
-            predictedCategory: result.predictedCategory || 'other',
-            predictedPriority: result.predictedPriority || 'medium',
-            summary: result.summary || title,
-            reasoning: result.reasoning || 'Derived from contextual language analysis.',
-            suggestedDepartmentCode: result.suggestedDepartmentCode || 'ESTATE',
-            confidenceScore: result.confidenceScore || 0.85,
-          };
         }
-      } catch (networkErr) {
-        console.warn(
-          '[UniBridge AI] Server proxy not reached. Falling back to local heuristic analysis:',
-          networkErr
-        );
+      );
+
+      if (!error && data && !data.error) {
+        return {
+          predictedCategory: data.predictedCategory || 'other',
+          predictedPriority: data.predictedPriority || 'medium',
+          summary: data.summary || title,
+          reasoning:
+            data.reasoning ||
+            'Derived from contextual language analysis.',
+          suggestedDepartmentCode:
+            data.suggestedDepartmentCode || 'ESTATE',
+          confidenceScore: data.confidenceScore || 0.85,
+        };
       }
+
+      console.warn(
+        '[UniBridge AI] Supabase Edge Function failed. Using local fallback:',
+        error || data?.error
+      );
+    } catch (err) {
+      console.warn(
+        '[UniBridge AI] Edge Function unavailable. Using local fallback:',
+        err
+      );
     }
 
-    // 2. Intelligent explainable heuristic engine fallback (keeps UI functional without offline breaks)
     return this.fallbackAnalysis(title, description);
   },
 
-  // Rule-based explainable fallback when Gemini server proxy is offline
-  fallbackAnalysis(title: string, description: string): AIComplaintAnalysis {
+  fallbackAnalysis(
+    title: string,
+    description: string
+  ): AIComplaintAnalysis {
     const text = `${title} ${description}`.toLowerCase();
 
-    // Priority Detection
     let predictedPriority: ComplaintPriority = 'medium';
     let priorityReason = 'Standard campus service issue.';
 
@@ -72,7 +76,8 @@ export const aiService = {
       text.includes('danger')
     ) {
       predictedPriority = 'urgent';
-      priorityReason = 'Urgent: Safety hazard or immediate risk detected in submission.';
+      priorityReason =
+        'Urgent: Safety hazard or immediate risk detected in submission.';
     } else if (
       text.includes('exam') ||
       text.includes('hall ticket') ||
@@ -83,7 +88,8 @@ export const aiService = {
       text.includes('blackout')
     ) {
       predictedPriority = 'high';
-      priorityReason = 'High: Significant disruption to student daily study or living conditions.';
+      priorityReason =
+        'High: Significant disruption to student daily study or living conditions.';
     } else if (
       text.includes('light flicker') ||
       text.includes('cleanliness') ||
@@ -92,10 +98,10 @@ export const aiService = {
       text.includes('table')
     ) {
       predictedPriority = 'low';
-      priorityReason = 'Low: Routine aesthetic or non-blocking maintenance.';
+      priorityReason =
+        'Low: Routine aesthetic or non-blocking maintenance.';
     }
 
-    // Category Detection
     let predictedCategory: ComplaintCategory = 'infrastructure';
     let suggestedDepartmentCode = 'ESTATE';
 
@@ -170,7 +176,6 @@ export const aiService = {
       suggestedDepartmentCode = 'SPORTS';
     }
 
-    // Executive summary (first sentence or capped string)
     const summary =
       title.length > 80 ? `${title.substring(0, 77)}...` : title;
 

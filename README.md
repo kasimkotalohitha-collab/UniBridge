@@ -34,9 +34,6 @@ Google Gemini 2.5 Flash
 **Deployment:** 
 Cloudflare Pages
 
-Links
-Live: Open UniBridge →
-
  **UniBridge**
 **One platform. One campus. Better communication.**
 
